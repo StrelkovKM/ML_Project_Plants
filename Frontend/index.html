@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plant Diagnosis Pro — ML Классификатор</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #86efac; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #22c55e; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col items-center py-10 px-4">
+
+    <div class="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full mb-8 border border-gray-100">
+        <h1 class="text-3xl font-extrabold text-green-700 mb-2 text-center">Диагностика растений</h1>
+        <p class="text-gray-500 text-sm text-center mb-8">Загрузите фото листа для мгновенного анализа нейросетью</p>
+        
+        <div class="mb-6">
+            <label class="block mb-2 text-sm font-semibold text-gray-700">Выберите изображение</label>
+            <input type="file" id="imageInput" accept="image/*" 
+                   class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-6 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 transition-all cursor-pointer">
+        </div>
+
+        <button onclick="uploadImage()" 
+                class="w-full bg-green-600 text-white py-3 px-4 rounded-xl hover:bg-green-700 transform active:scale-95 transition duration-200 font-bold shadow-md shadow-green-200">
+            Проанализировать
+        </button>
+
+        <div id="imagePreviewContainer" class="mt-8 hidden flex flex-col items-center animate-fadeIn">
+            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Ваше фото:</p>
+            <img id="imagePreview" src="#" alt="Предпросмотр" class="max-h-64 rounded-xl shadow-inner border-4 border-gray-50 object-cover">
+        </div>
+
+        <div id="loader" class="hidden mt-6 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-green-500 border-t-transparent"></div>
+            <p class="text-green-600 font-medium mt-2">Нейросеть изучает структуру листа...</p>
+        </div>
+
+        <div id="result" class="mt-8 hidden p-5 bg-green-50 rounded-xl border border-green-100">
+            <h2 class="text-lg font-bold text-gray-800 mb-3 flex items-center">
+                <span class="mr-2">🔬</span> Результат:
+            </h2>
+            <div class="space-y-2">
+                <p class="text-gray-700">Диагноз: <span id="diseaseName" class="font-bold text-red-600 text-lg"></span></p>
+                <p class="text-gray-700">Уверенность: <span id="confidence" class="font-bold text-gray-900"></span></p>
+            </div>
+            
+            <div class="mt-4 pt-4 border-t border-green-200">
+                <p class="text-xs font-bold text-green-700 uppercase mb-2">Вероятности других классов:</p>
+                <ul id="allPredictions" class="space-y-1"></ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl shadow-lg max-w-2xl w-full border border-gray-100">
+        <h2 class="text-xl font-bold text-gray-800 mb-6 flex justify-between items-center">
+            Последние диагностики
+            <button onclick="loadHistory()" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1 rounded-full transition-all">Обновить базу</button>
+        </h2>
+        <div class="overflow-x-auto custom-scrollbar max-h-80 overflow-y-auto">
+            <table class="min-w-full text-left">
+                <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-widest">
+                    <tr>
+                        <th class="px-6 py-3 font-semibold">Дата и время</th>
+                        <th class="px-6 py-3 font-semibold">Объект / Диагноз</th>
+                        <th class="px-6 py-3 font-semibold text-right">Точность</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody" class="divide-y divide-gray-50">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Функция загрузки истории
+        async function loadHistory() {
+            try {
+                const response = await fetch('/history?limit=10');
+                const data = await response.json();
+                const tbody = document.getElementById('historyBody');
+                tbody.innerHTML = ''; 
+
+                data.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.className = "hover:bg-green-50/30 transition-colors";
+                    
+                    const date = new Date(item.created_at).toLocaleString('ru-RU', {
+                        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+                    });
+                    
+                    row.innerHTML = `
+                        <td class="px-6 py-4 text-sm text-gray-400">${date}</td>
+                        <td class="px-6 py-4 text-sm font-bold text-gray-700">${item.disease_name}</td>
+                        <td class="px-6 py-4 text-right">
+                            <span class="inline-block bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-black">
+                                ${item.confidence}%
+                            </span>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (error) {
+                console.error('Ошибка загрузки истории:', error);
+            }
+        }
+
+        // Основная функция загрузки и анализа
+        async function uploadImage() {
+            const fileInput = document.getElementById('imageInput');
+            const resultDiv = document.getElementById('result');
+            const loader = document.getElementById('loader');
+            const previewContainer = document.getElementById('imagePreviewContainer');
+            const previewImg = document.getElementById('imagePreview');
+            
+            if (fileInput.files.length === 0) {
+                alert('Пожалуйста, сначала выберите файл изображения');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            
+            // Показываем предпросмотр
+            previewImg.src = URL.createObjectURL(file);
+            previewContainer.classList.remove('hidden');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            loader.classList.remove('hidden');
+            resultDiv.classList.add('hidden');
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('diseaseName').innerText = data.disease;
+                    document.getElementById('confidence').innerText = data.confidence;
+                    
+                    const list = document.getElementById('allPredictions');
+                    list.innerHTML = '';
+                    
+                    // Выводим только те варианты, где вероятность > 1%
+                    for (const [name, prob] of Object.entries(data.all_predictions)) {
+                        const li = document.createElement('li');
+                        li.className = "flex justify-between text-[10px] text-gray-500";
+                        li.innerHTML = `<span>${name}</span> <span class="font-mono">${prob}</span>`;
+                        list.appendChild(li);
+                    }
+
+                    resultDiv.classList.remove('hidden');
+                    loadHistory(); // Обновляем таблицу
+                } else {
+                    alert('Ошибка сервера: ' + data.detail);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Связь с сервером потеряна. Проверьте запущен ли бэкенд.');
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', loadHistory);
+    </script>
+</body>
+</html>
